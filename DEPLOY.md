@@ -1,12 +1,12 @@
 # Deploying counterparser to a Linux server (Docker)
 
 nginx stays a native install on the host (per [ARCHITECTURE.md](ARCHITECTURE.md)); only the
-daemon runs in Docker. The two talk over a Unix socket, which means the container needs to
-write that socket file somewhere nginx can also see it — a bind-mounted host directory, not a
-Docker-internal volume.
+daemon runs in Docker, via `docker compose` — that's the only supported deployment path. The
+two talk over a Unix socket, which means the container needs to write that socket file
+somewhere nginx can also see it.
 
-`docker-compose.yml`'s bind mounts are relative to wherever you put the repo (`./config.toml`,
-`./run`) — there's no hardcoded path, so clone it anywhere (`/var/www/counterparser`,
+Everything shared between host and container — `config.toml`, the socket — lives in one
+directory: `./run`, relative to wherever you put the repo (`/var/www/counterparser`,
 `/srv/counterparser`, wherever). The examples below use `/var/www/counterparser`; substitute
 your own path.
 
@@ -19,14 +19,14 @@ sudo chown "$(id -u)":"$(id -g)" /var/www/counterparser   # or whatever user run
 cd /var/www/counterparser
 git clone <this-repo-url> .   # or scp/rsync the project directory here
 
-cp config.example.toml config.toml
 mkdir -p run
+cp config.example.toml run/config.toml
 ```
 
-Edit `config.toml`:
+Edit `run/config.toml`:
 - `server.socket_path` → `/run/counterparser/counterparser.sock` (the *container-internal*
-  path — it's the mount target in `docker-compose.yml`, matched to the `./run` directory you
-  just created).
+  path — `./run` is mounted at `/run/counterparser`, so this resolves to `run/counterparser.sock`
+  on the host).
 - `whitelist.cidrs`, `bot_pools`, `cooldowns` → your real values.
 - Leave `challenge.hmac_secret` alone; it's overridden by an env var (next step) so the real
   secret never sits in a file on disk.
@@ -39,11 +39,10 @@ echo "COUNTERPARSER_HMAC_SECRET=$(openssl rand -hex 32)" > .env
 chmod 600 .env
 ```
 
-> **`config.toml` and `run/` must exist before the first `docker compose up`.**
-> `docker-compose.yml` mounts both with `bind.create_host_path: false`, so if either is
-> missing, compose refuses to start with `Error response from daemon: ... bind source path does
-> not exist` instead of silently mounting an empty directory in their place — a much clearer
-> failure than what used to happen. If you hit that, run the `cp`/`mkdir` steps above and
+> **`run/` must exist before the first `docker compose up`.** `docker-compose.yml` mounts it
+> with `bind.create_host_path: false`, so if you skip the `mkdir -p run` step above, compose
+> refuses to start with `Error response from daemon: ... bind source path does not exist`
+> instead of silently mounting an empty directory in its place. Run the `mkdir`/`cp` steps and
 > `docker compose up -d` again.
 
 ## 2. Start
@@ -57,27 +56,16 @@ every push to `main`, so the server just pulls it:
 docker compose pull
 docker compose up -d
 docker compose logs -f counterparser   # confirm "listening on unix:/run/counterparser/..."
-ls -la run                             # counterparser.sock should now exist, mode 0777
+ls -la run                             # config.toml and counterparser.sock should both be here
 ```
 
 `docker-compose.yml` only ever runs the prebuilt GHCR image — it has no `build:` key, so
 `docker compose up -d` can never silently fall back to a slow from-source build on the server.
-To test a local change before pushing it, build and run it directly instead:
-
-```bash
-docker build -t counterparser:latest .
-docker run -d --name counterparser --restart unless-stopped \
-  -e COUNTERPARSER_CONFIG=/etc/counterparser/config.toml \
-  -e COUNTERPARSER_HMAC_SECRET="$(openssl rand -hex 32)" \
-  -v "$(pwd)/config.toml:/etc/counterparser/config.toml:ro" \
-  -v "$(pwd)/run:/run/counterparser" \
-  counterparser:latest
-```
 
 ## 3. Point nginx at the socket
 
 Same `auth_request` / `@respond` setup as in ARCHITECTURE.md — only the socket path changes,
-since nginx (on the host) now reaches the daemon (in a container) through the bind-mounted
+since nginx (on the host) now reaches the daemon (in a container) through the bind-mounted `run/`
 directory rather than a socket the daemon created directly at `/run/counterparser.sock`. Use the
 **absolute** path to wherever you cloned the repo (nginx doesn't understand relative paths):
 
@@ -153,5 +141,5 @@ docker compose pull
 docker compose up -d   # recreates just the counterparser container; nginx is untouched
 ```
 
-`config.toml`/`.env` changes need only `docker compose up -d` (no pull/build) — compose picks
-up the mounted file on container recreation.
+`run/config.toml`/`.env` changes need only `docker compose up -d` (no pull) — compose picks up
+the mounted file on container recreation.

@@ -21,14 +21,10 @@ RUN groupadd --system counterparser && useradd --system --gid counterparser coun
 COPY --from=builder /build/target/release/counterparser /usr/local/bin/counterparser
 COPY config.example.toml /etc/counterparser/config.example.toml
 
-# Pre-create the config.toml mount point as an empty *file* in the image. Without this, bind-
-# mounting a host file onto a target path that doesn't exist in the image at all can make
-# Docker auto-create the mountpoint as a directory instead, causing a file-vs-directory bind
-# mount error at container start. The bind mount fully replaces this placeholder's contents.
-RUN touch /etc/counterparser/config.toml && chown counterparser:counterparser /etc/counterparser/config.toml
-
 USER counterparser
-ENV COUNTERPARSER_CONFIG=/etc/counterparser/config.toml
+# config.toml lives in the same bind-mounted directory as the socket (./run on the host,
+# /run/counterparser in the container) — see docker-compose.yml.
+ENV COUNTERPARSER_CONFIG=/run/counterparser/config.toml
 ENV RUST_LOG=info
 
 # The socket directory (/run/counterparser) is meant to be bind-mounted from the host so

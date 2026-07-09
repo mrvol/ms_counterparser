@@ -1,25 +1,16 @@
 services:
   counterparser:
-    # Built by .github/workflows/docker.yml on every push to main and pulled from GHCR — this
-    # compose file only ever runs the prebuilt image, never builds locally. For local
-    # dev/testing, use `docker build -t counterparser:latest .` directly (see DEPLOY.md).
+    # Built by .github/workflows/docker.yml on every push to main and pulled from GHCR.
     image: ghcr.io/mrvol/ms_counterparser:latest
     restart: unless-stopped
     environment:
-      COUNTERPARSER_CONFIG: /etc/counterparser/config.toml
+      COUNTERPARSER_CONFIG: /run/counterparser/config.toml
       COUNTERPARSER_HMAC_SECRET: ${COUNTERPARSER_HMAC_SECRET:?set COUNTERPARSER_HMAC_SECRET in .env}
       RUST_LOG: info
     volumes:
-      # Long-form bind config with create_host_path: false: if config.toml or the run
-      # directory doesn't exist yet on the host, compose fails loudly instead of silently
-      # mounting an empty directory in its place (see the DEPLOY.md warning about
-      # "Is a directory (os error 21)").
-      - type: bind
-        source: ./config.toml
-        target: /etc/counterparser/config.toml
-        read_only: true
-        bind:
-          create_host_path: false
+      # Everything shared between host and container — config.toml, the socket — lives in one
+      # bind-mounted directory. create_host_path: false: if ./run doesn't exist yet on the
+      # host, compose fails loudly instead of silently mounting an empty directory in its place.
       - type: bind
         source: ./run
         target: /run/counterparser
@@ -30,3 +21,8 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
