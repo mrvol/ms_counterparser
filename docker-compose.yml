@@ -1,18 +1,30 @@
 services:
   counterparser:
-    # Pulled from GHCR by default (built by .github/workflows/docker.yml on every push to
-    # main). `build: .` is still here so `docker compose build` works for local dev/testing
-    # without needing a registry round-trip.
+    # Built by .github/workflows/docker.yml on every push to main and pulled from GHCR — this
+    # compose file only ever runs the prebuilt image, never builds locally. For local
+    # dev/testing, use `docker build -t counterparser:latest .` directly (see DEPLOY.md).
     image: ghcr.io/mrvol/ms_counterparser:latest
-    build: .
     restart: unless-stopped
     environment:
       COUNTERPARSER_CONFIG: /etc/counterparser/config.toml
       COUNTERPARSER_HMAC_SECRET: ${COUNTERPARSER_HMAC_SECRET:?set COUNTERPARSER_HMAC_SECRET in .env}
       RUST_LOG: info
     volumes:
-      - ./config.toml:/etc/counterparser/config.toml:ro
-      - /srv/counterparser/run:/run/counterparser
+      # Long-form bind config with create_host_path: false: if config.toml or the run
+      # directory doesn't exist yet on the host, compose fails loudly instead of silently
+      # mounting an empty directory in its place (see the DEPLOY.md warning about
+      # "Is a directory (os error 21)").
+      - type: bind
+        source: ./config.toml
+        target: /etc/counterparser/config.toml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./run
+        target: /run/counterparser
+        bind:
+          create_host_path: false
     healthcheck:
       test: ["CMD", "test", "-S", "/run/counterparser/counterparser.sock"]
       interval: 10s

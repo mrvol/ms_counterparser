@@ -5,23 +5,28 @@ daemon runs in Docker. The two talk over a Unix socket, which means the containe
 write that socket file somewhere nginx can also see it — a bind-mounted host directory, not a
 Docker-internal volume.
 
+`docker-compose.yml`'s bind mounts are relative to wherever you put the repo (`./config.toml`,
+`./run`) — there's no hardcoded path, so clone it anywhere (`/var/www/counterparser`,
+`/srv/counterparser`, wherever). The examples below use `/var/www/counterparser`; substitute
+your own path.
+
 ## 1. Prepare the host
 
 ```bash
-sudo mkdir -p /srv/counterparser/run
-sudo chown "$(id -u)":"$(id -g)" /srv/counterparser/run   # or whatever user runs docker compose
+sudo mkdir -p /var/www/counterparser
+sudo chown "$(id -u)":"$(id -g)" /var/www/counterparser   # or whatever user runs docker compose
 
-cd /srv/counterparser
-git clone <this-repo-url> app   # or scp/rsync the project directory here
-cd app
+cd /var/www/counterparser
+git clone <this-repo-url> .   # or scp/rsync the project directory here
 
 cp config.example.toml config.toml
+mkdir -p run
 ```
 
 Edit `config.toml`:
 - `server.socket_path` → `/run/counterparser/counterparser.sock` (the *container-internal*
-  path — it's the mount target in `docker-compose.yml`, matched to the host directory you just
-  created).
+  path — it's the mount target in `docker-compose.yml`, matched to the `./run` directory you
+  just created).
 - `whitelist.cidrs`, `bot_pools`, `cooldowns` → your real values.
 - Leave `challenge.hmac_secret` alone; it's overridden by an env var (next step) so the real
   secret never sits in a file on disk.
@@ -34,6 +39,13 @@ echo "COUNTERPARSER_HMAC_SECRET=$(openssl rand -hex 32)" > .env
 chmod 600 .env
 ```
 
+> **`config.toml` and `run/` must exist before the first `docker compose up`.**
+> `docker-compose.yml` mounts both with `bind.create_host_path: false`, so if either is
+> missing, compose refuses to start with `Error response from daemon: ... bind source path does
+> not exist` instead of silently mounting an empty directory in their place — a much clearer
+> failure than what used to happen. If you hit that, run the `cp`/`mkdir` steps above and
+> `docker compose up -d` again.
+
 ## 2. Start
 
 `.github/workflows/docker.yml` builds and pushes `ghcr.io/mrvol/ms_counterparser:latest` on
@@ -45,21 +57,20 @@ every push to `main`, so the server just pulls it:
 docker compose pull
 docker compose up -d
 docker compose logs -f counterparser   # confirm "listening on unix:/run/counterparser/..."
-ls -la /srv/counterparser/run          # counterparser.sock should now exist, mode 0777
+ls -la run                             # counterparser.sock should now exist, mode 0777
 ```
 
-To build locally instead (e.g. testing a change before it's pushed), use `docker compose build`
-in place of `pull` — `docker-compose.yml` keeps a `build: .` fallback for exactly this.
-
-Without compose, the equivalent is:
+`docker-compose.yml` only ever runs the prebuilt GHCR image — it has no `build:` key, so
+`docker compose up -d` can never silently fall back to a slow from-source build on the server.
+To test a local change before pushing it, build and run it directly instead:
 
 ```bash
 docker build -t counterparser:latest .
 docker run -d --name counterparser --restart unless-stopped \
   -e COUNTERPARSER_CONFIG=/etc/counterparser/config.toml \
   -e COUNTERPARSER_HMAC_SECRET="$(openssl rand -hex 32)" \
-  -v /srv/counterparser/app/config.toml:/etc/counterparser/config.toml:ro \
-  -v /srv/counterparser/run:/run/counterparser \
+  -v "$(pwd)/config.toml:/etc/counterparser/config.toml:ro" \
+  -v "$(pwd)/run:/run/counterparser" \
   counterparser:latest
 ```
 
@@ -67,11 +78,12 @@ docker run -d --name counterparser --restart unless-stopped \
 
 Same `auth_request` / `@respond` setup as in ARCHITECTURE.md — only the socket path changes,
 since nginx (on the host) now reaches the daemon (in a container) through the bind-mounted
-directory rather than a socket the daemon created directly at `/run/counterparser.sock`:
+directory rather than a socket the daemon created directly at `/run/counterparser.sock`. Use the
+**absolute** path to wherever you cloned the repo (nginx doesn't understand relative paths):
 
 ```nginx
 upstream counterparser {
-    server unix:/srv/counterparser/run/counterparser.sock;
+    server unix:/var/www/counterparser/run/counterparser.sock;
     keepalive 32;
 }
 
@@ -106,21 +118,28 @@ server {
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-If nginx logs `connect() to unix:/srv/counterparser/run/counterparser.sock failed (13:
-Permission denied)`, check that nginx's user can traverse `/srv/counterparser/run` (execute bit
-on every parent directory) — the socket file itself is created world-read/write (see the
-`umask 000` note in the [Dockerfile](Dockerfile)), so the usual failure mode is a directory
-permission, not the socket.
+If nginx logs `connect() to unix:/var/www/counterparser/run/counterparser.sock failed (13:
+Permission denied)`, check that nginx's user can traverse every parent directory in that path
+(execute bit) — the socket file itself is created world-read/write (see the `umask 000` note in
+the [Dockerfile](Dockerfile)), so the usual failure mode is a directory permission, not the
+socket.
 
 ## 4. Verify end to end
 
 ```bash
-curl -s --unix-socket /srv/counterparser/run/counterparser.sock http://localhost/healthz
+curl -s --unix-socket run/counterparser.sock http://localhost/healthz
 curl -s -o /dev/null -w "%{http_code}\n" \
-  --unix-socket /srv/counterparser/run/counterparser.sock \
+  --unix-socket run/counterparser.sock \
   -H "X-Real-IP: 127.0.0.1" http://localhost/check   # expect 204 if 127.0.0.1 is whitelisted
 
 curl -sI https://your-domain.example/   # through nginx end to end
+```
+
+For ongoing monitoring, `/stats` (aggregate counts only — see the Endpoints table in
+[ARCHITECTURE.md](ARCHITECTURE.md)) is reachable the same way and isn't wired into nginx:
+
+```bash
+curl -s --unix-socket run/counterparser.sock http://localhost/stats
 ```
 
 ## Updating
@@ -129,7 +148,7 @@ Once CI has finished building the new image for a push (check the Actions tab, o
 `gh run watch` from the repo):
 
 ```bash
-cd /srv/counterparser/app
+cd /var/www/counterparser
 docker compose pull
 docker compose up -d   # recreates just the counterparser container; nginx is untouched
 ```
