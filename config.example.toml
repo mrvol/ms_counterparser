@@ -1,0 +1,38 @@
+# Copy to config.toml and adjust. Set the real HMAC secret via the
+# COUNTERPARSER_HMAC_SECRET env var in production rather than leaving it in this file.
+
+[server]
+socket_path = "/run/counterparser.sock"
+
+[thresholds]
+window_secs = 60
+max_requests_per_window = 120
+
+[whitelist]
+cidrs = [
+    "127.0.0.1/32",
+    "10.0.0.0/8",
+]
+
+# Known-good crawler ranges. An IP inside one of these CIDRs is always allowed, no DNS lookup
+# needed. `rdns_suffix` is used separately to spot impersonators: a request that forward-confirms
+# to this suffix but whose IP isn't listed here gets flagged instead of trusted outright.
+[bot_pools.google]
+cidrs = ["66.249.64.0/19"]
+rdns_suffix = "googlebot.com"
+
+[bot_pools.bing]
+cidrs = ["157.55.39.0/24"]
+rdns_suffix = "search.msn.com"
+
+# Cooldown duration per classified service. "default" is the fallback for any service name not
+# listed here. Accepts simple durations: "30s", "10m", "24h", "1d".
+[cooldowns]
+default = "30m"
+unknown = "10m"
+impersonator = "24h"
+
+[challenge]
+cookie_name = "cp_ok"
+cookie_ttl_secs = 3600
+hmac_secret = "changeme-set-via-COUNTERPARSER_HMAC_SECRET-in-prod"

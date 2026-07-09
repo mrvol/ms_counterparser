@@ -1,0 +1,79 @@
+version: "3"
+
+vars:
+  SOCKET: /tmp/counterparser-dev.sock
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  build:
+    desc: Build the debug binary
+    cmds:
+      - cargo build
+
+  release:
+    desc: Build the release binary
+    cmds:
+      - cargo build --release
+
+  run:
+    desc: Run the daemon against config.toml (falls back to config.example.toml if missing)
+    cmds:
+      - |
+        if [ ! -f config.toml ]; then
+          echo "config.toml not found, generating one from config.example.toml"
+          echo "(socket_path rewritten to {{.SOCKET}} for local dev; edit hmac_secret before real use)"
+          sed 's#socket_path = .*#socket_path = "{{.SOCKET}}"#' config.example.toml > config.toml
+        fi
+      - COUNTERPARSER_CONFIG=config.toml RUST_LOG=info cargo run
+
+  test:
+    desc: Run the unit test suite
+    cmds:
+      - cargo test
+
+  fmt:
+    desc: Format the code
+    cmds:
+      - cargo fmt
+
+  fmt:check:
+    desc: Check formatting without writing changes
+    cmds:
+      - cargo fmt -- --check
+
+  lint:
+    desc: Run clippy on all targets, deny warnings
+    cmds:
+      - cargo clippy --all-targets -- -D warnings
+
+  check:
+    desc: Run fmt:check, lint, and test together (CI-equivalent)
+    cmds:
+      - task: fmt:check
+      - task: lint
+      - task: test
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - cargo clean
+
+  smoke:
+    desc: Start the daemon on a scratch socket and exercise /healthz and /check over it
+    cmds:
+      - cargo build
+      - rm -f {{.SOCKET}}
+      - sed 's#socket_path = .*#socket_path = "{{.SOCKET}}"#' config.example.toml > /tmp/counterparser-dev-config.toml
+      - |
+        COUNTERPARSER_CONFIG=/tmp/counterparser-dev-config.toml RUST_LOG=info ./target/debug/counterparser &
+        PID=$!
+        trap "kill $PID 2>/dev/null; rm -f {{.SOCKET}} /tmp/counterparser-dev-config.toml" EXIT
+        for i in $(seq 1 20); do [ -S {{.SOCKET}} ] && break; sleep 0.1; done
+        echo "--- /healthz ---"
+        curl -s --unix-socket {{.SOCKET}} http://localhost/healthz; echo
+        echo "--- /check (whitelisted 127.0.0.1, expect 204) ---"
+        curl -s -o /dev/null -w "%{http_code}\n" --unix-socket {{.SOCKET}} -H "X-Real-IP: 127.0.0.1" http://localhost/check; echo

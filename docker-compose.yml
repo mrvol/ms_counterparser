@@ -1,0 +1,17 @@
+services:
+  counterparser:
+    build: .
+    image: counterparser:latest
+    restart: unless-stopped
+    environment:
+      COUNTERPARSER_CONFIG: /etc/counterparser/config.toml
+      COUNTERPARSER_HMAC_SECRET: ${COUNTERPARSER_HMAC_SECRET:?set COUNTERPARSER_HMAC_SECRET in .env}
+      RUST_LOG: info
+    volumes:
+      - ./config.toml:/etc/counterparser/config.toml:ro
+      - /srv/counterparser/run:/run/counterparser
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/counterparser/counterparser.sock"]
+      interval: 10s
+      timeout: 3s
+      retries: 3

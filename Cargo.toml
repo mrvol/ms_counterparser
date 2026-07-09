@@ -1,0 +1,28 @@
+[package]
+name = "counterparser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+hyper = "1"
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower = "0.5"
+dashmap = "6"
+moka = { version = "0.12", features = ["future", "sync"] }
+ipnet = { version = "2", features = ["serde"] }
+hickory-resolver = "0.24"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+subtle = "2"
+rand = "0.8"
+time = { version = "0.3", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+thiserror = "2"
+async-trait = "0.1"

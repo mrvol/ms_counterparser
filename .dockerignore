@@ -1,0 +1,7 @@
+target
+config.toml
+.git
+.gitignore
+ARCHITECTURE.md
+Taskfile.yml
+*.md
