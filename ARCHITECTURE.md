@@ -54,3 +54,18 @@ server {
 3. **Maximum performance (later, only if needed) — native module.** A native module via `ngx-rust` (or logic modeled on `limit_req`) removes IPC entirely, but requires recompiling against nginx, and a panic in the module can kill worker processes. Not worth it until the daemon measurably bottlenecks under `auth_request`.
 
 Unit remains solely the app server; it is never in the filtering path.
+
+## Endpoints
+
+| Endpoint   | Called by                          | Purpose |
+|------------|-------------------------------------|---------|
+| `/check`   | nginx `auth_request`                | Decides `204`/`403`. |
+| `/respond` | nginx `error_page 403 = @respond`   | Renders the actual `200` page the client sees. |
+| `/healthz` | liveness probes                     | Plain `200 ok`. |
+| `/stats`   | operator / monitoring, direct only  | Aggregate JSON: uptime, tracked IP count, lifetime verdict counts, active cooldowns by service, rDNS cache size. No per-IP data. |
+
+Only `/check` and `/respond` are wired into nginx. `/stats` (and `/healthz`) are reachable by
+anyone who can already talk to the daemon's Unix socket directly — e.g. `curl --unix-socket
+/run/counterparser.sock http://localhost/stats` from the same host. If you want it scraped by
+an external monitoring system, add an explicit nginx location for it with its own auth (basic
+auth or an IP allowlist) rather than exposing it unauthenticated.
