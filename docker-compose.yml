@@ -1,7 +1,10 @@
 services:
   counterparser:
+    # Pulled from GHCR by default (built by .github/workflows/docker.yml on every push to
+    # main). `build: .` is still here so `docker compose build` works for local dev/testing
+    # without needing a registry round-trip.
+    image: ghcr.io/mrvol/ms_counterparser:latest
     build: .
-    image: counterparser:latest
     restart: unless-stopped
     environment:
       COUNTERPARSER_CONFIG: /etc/counterparser/config.toml

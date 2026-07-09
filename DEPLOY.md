@@ -34,14 +34,22 @@ echo "COUNTERPARSER_HMAC_SECRET=$(openssl rand -hex 32)" > .env
 chmod 600 .env
 ```
 
-## 2. Build and start
+## 2. Start
+
+`.github/workflows/docker.yml` builds and pushes `ghcr.io/mrvol/ms_counterparser:latest` on
+every push to `main`, so the server just pulls it:
 
 ```bash
-docker compose build
+# If the mrvol/ms_counterparser repo/package is private, authenticate first with a PAT
+# that has read:packages scope: docker login ghcr.io -u <github-username>
+docker compose pull
 docker compose up -d
 docker compose logs -f counterparser   # confirm "listening on unix:/run/counterparser/..."
 ls -la /srv/counterparser/run          # counterparser.sock should now exist, mode 0777
 ```
+
+To build locally instead (e.g. testing a change before it's pushed), use `docker compose build`
+in place of `pull` — `docker-compose.yml` keeps a `build: .` fallback for exactly this.
 
 Without compose, the equivalent is:
 
@@ -117,12 +125,14 @@ curl -sI https://your-domain.example/   # through nginx end to end
 
 ## Updating
 
+Once CI has finished building the new image for a push (check the Actions tab, or
+`gh run watch` from the repo):
+
 ```bash
 cd /srv/counterparser/app
-git pull   # or re-sync the source
-docker compose build
+docker compose pull
 docker compose up -d   # recreates just the counterparser container; nginx is untouched
 ```
 
-Config or secret changes only need `docker compose up -d` (no rebuild) — compose picks up the
-new `.env`/mounted `config.toml` on container recreation.
+`config.toml`/`.env` changes need only `docker compose up -d` (no pull/build) — compose picks
+up the mounted file on container recreation.
